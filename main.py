@@ -28,8 +28,8 @@ def train_test_split(headers, data, test_size, random):
     test_data = test_validation_data[0: validation_split]
     validation_data = test_validation_data[validation_split: len(test_validation_data)]
 
-    x_train = np.asarray(training_data).astype('float32')
-    x_test = np.asarray(test_data).astype('float32')
+    x_train = np.asarray(test_data).astype('float32')
+    x_test = np.asarray(training_data).astype('float32')
     x_validation = np.asarray(validation_data).astype('float32')
 
     return x_train, x_test, x_validation
@@ -41,24 +41,25 @@ training, testing, validation = train_test_split(headers, data, 0.10, False)
 
 # randomly remove some data
 def random_remove(df, rate):
-    dataset = df.reset_index()
-    melt_one = pd.melt(dataset, id_vars = ['index'])
-    sampled = melt_one.sample(frac = rate).reset_index(drop = True)
-    dataset = sampled.pivot(index = 'index', columns = 'variable', values= 'value')
-
-    return dataset
-
+  df = pd.DataFrame(df)
+  rate = rate+df.isnull().sum().sum()/(df.shape[0]*df.shape[1])
+  dataset = df.reset_index()
+  melt_one = pd.melt(dataset, id_vars = ['index'])
+  sampled = melt_one.sample(frac = rate).reset_index(drop = True)
+  dataset = sampled.pivot(index = 'index', columns = 'variable', values= 'value')
+  dataset = np.asarray(dataset).astype('float32')
+  return dataset
 
 # impute mean value into dataset
 def fill_mean(dataset):
-    for column in list(dataset.columns[dataset.isnull().sum() > 0]):
-        mean_val = dataset[column].mean()
-        dataset[column].fillna(mean_val, inplace=True)
+  dataset = pd.DataFrame(dataset)
+  for column in list(dataset.columns[dataset.isnull().sum() > 0]):
+    mean_val = dataset[column].mean()
+    dataset[column].fillna(mean_val, inplace=True)
+  dataset = np.asarray(dataset).astype('float32')
+  return dataset
 
-    return dataset
-
-
-# preprocess of dataset
+'''# preprocess of dataset
 y_train = pd.DataFrame(training)
 y_test = pd.DataFrame(testing)
 
@@ -75,71 +76,74 @@ x_train = np.asarray(x_train).astype('float32')
 y_train = np.asarray(y_train).astype('float32')
 x_test = np.asarray(x_test).astype('float32')
 y_test = np.asarray(y_test).astype('float32')
-
-# parameters of model
+'''
+#parameters of model
 nodes = 5
 times = 5
 
-
 # model with expectation-maximization algorithm
 class EMAmodel(Model):
-    def __init__(self, x, nodes, times):
-        super(EMAmodel, self).__init__()
-        self.times = times
-        self.length = x.shape[1]
-        self.layer = []
+  def __init__(self, x, nodes, times):
+    super(EMAmodel, self).__init__()
+    self.times = times
+    self.length = x.shape[1]
+    self.layer = []
+    for i in range(self.length):   # create branches
+      self.layer.append(tf.keras.Sequential(
+        layers=[Dense(nodes, activation='tanh', input_shape=(self.length,)),Dense(1)], name=None))
 
-        for i in range(self.length):   # create branches
-            self.layer.append(tf.keras.Sequential(
-                layers=[Dense(nodes, activation='tanh', input_shape=(self.length,)),Dense(1)], name=None))
+  def call(self, x):
+    for i in range(self.times):   # iterations to calculate the mean value of x^n and x^(n+1)
+      tmp = []
+      for j in range(self.length):      # create multi-output network
+        tmp.append(self.layer[j](x))
+      output = tf.concat(tmp,1)
+      x = (x+output)/2
+    return x
 
-    def call(self, x):
-        for i in range(self.times):   # iterations to calculate the mean value of x^n and x^(n+1)
-            tmp = []
-            for j in range(self.length):      # create multi-output network
-                tmp.append(self.layer[j](x))
-            output = tf.concat(tmp, 1)
-            x = (x+output)/2
-        return x
-
-
-model = EMAmodel(x_train, nodes, times)  # instantiate model
+model = EMAmodel(training,nodes,times)                     # instantiate model
 loss_object = keras.losses.MeanSquaredError()
 optimizer = keras.optimizers.Adam(learning_rate=0.1)
 
-
-def evaluation(predictions, y):  # evaluate r2
+def evaluation(predictions, y):                   # evaluate r2
     sse = np.sum((y - predictions) ** 2)
     sst = np.sum((y - np.mean(y)) ** 2)
     return 1 - sse / sst
 
+def train(x_train, y_train):               # training step
+  with tf.GradientTape() as tape:
+    predictions = model(x_train)
+    loss = loss_object(y_train, predictions)
+  gradients = tape.gradient(loss, model.trainable_variables)                  # calculate gradients
+  optimizer.apply_gradients(zip(gradients, model.trainable_variables))        # optimize parameters
+  r2 = evaluation(predictions, y_train)
+  return loss, r2
 
-def train(x_train, y_train):  # training step
-    with tf.GradientTape() as tape:
-        predictions = model(x_train)
-        loss = loss_object(y_train, predictions)
-    gradients = tape.gradient(loss, model.trainable_variables)            # calculate gradients
-    optimizer.apply_gradients(zip(gradients, model.trainable_variables))  # optimize parameters
-    r2 = evaluation(predictions, y_train)
-    return loss, r2
+epochs = 100
+y_train = fill_mean(training)
+for epoch in range(epochs):                # training epochs
+  x_train = random_remove(training, 0.5)
+  fill_mean(x_train)
+  loss, r2 = train(x_train, y_train)
+  if (epoch%100 == 0):
+    template = 'Epoch {}, Loss {}, Evaluation {}'
+    print(template.format(epoch, loss, r2))
 
-
-epochs = 20000
-for epoch in range(epochs):  # training epochs
-    loss, r2 = train(x_train, y_train)
-    if (epoch % 100) == 0:
-        template = 'Epoch {}, Loss {}, Evaluation {}'
-        print(template.format(epoch, loss, r2))
-
-
-def test(x_test, y_test):  # testing step
+def test(x_test, y_test):                      # testing step
     predictions = model(x_test)
     loss = loss_object(y_test, predictions)
     r2 = evaluation(predictions, y_test)
     template = 'Loss {}, Evaluation {}'
     print(template.format(loss, r2))
 
-
+y_test = fill_mean(testing)
+x_test = random_remove(testing, 0.5)
+fill_mean(x_test)
 test(x_test, y_test)          # test
+
+y_validation = fill_mean(validation)
+x_validation = random_remove(validation, 0.5)
+fill_mean(x_validation)
+test(x_validation, y_validation)          # test
 
 # predict only: predictons = model(dataset)
