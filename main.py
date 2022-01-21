@@ -20,17 +20,23 @@ def train_test_split(headers, data, test_size, random):
     if random:
         np.random.shuffle(data)
 
-    test_data = data[0: split]
+    test_validation_data = data[0: split]
     training_data = data[split: len(data)]
 
-    x_train = np.asarray(test_data).astype('float32')
-    x_test = np.asarray(training_data).astype('float32')
+    validation_split = int(len(test_validation_data) / 2)
 
-    return x_train, x_test
+    test_data = test_validation_data[0: validation_split]
+    validation_data = test_validation_data[validation_split: len(test_validation_data)]
+
+    x_train = np.asarray(training_data).astype('float32')
+    x_test = np.asarray(test_data).astype('float32')
+    x_validation = np.asarray(validation_data).astype('float32')
+
+    return x_train, x_test, x_validation
 
 
 headers, data = load_data("databases/nasa_filtered.csv", 104)
-training, testing, = train_test_split(headers, data, 0.05, False)
+training, testing, validation = train_test_split(headers, data, 0.10, False)
 
 
 # randomly remove some data
