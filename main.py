@@ -4,6 +4,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Dense
+from keras import backend as K
 
 
 def load_data(file_name, header_column):
@@ -17,27 +18,28 @@ def load_data(file_name, header_column):
 def train_test_split(headers, data, test_size, random):
     split = int(len(data) * test_size)
 
+    # for checking the model with something more simplistic
+    # orbital_period_days_index = np.where(headers == "Orbital Period Days")[0][0]
+    # mass_index = np.where(headers == "Mass")[0][0]
+
     if random:
         np.random.shuffle(data)
 
-    test_validation_data = data[0: split]
+    test_data = data[0: split]
     training_data = data[split: len(data)]
 
-    validation_split = int(len(test_validation_data) / 2)
-
-    test_data = test_validation_data[0: validation_split]
-    validation_data = test_validation_data[validation_split: len(test_validation_data)]
+    # x_train = training_data[:, orbital_period_days_index:mass_index + 1]
+    # x_test = test_data[:, orbital_period_days_index:mass_index + 1]
 
     x_train = np.asarray(test_data).astype('float32')
     x_test = np.asarray(training_data).astype('float32')
-    x_validation = np.asarray(validation_data).astype('float32')
 
-    return x_train, x_test, x_validation
+    return x_train, x_test  # np.nan_to_num(x_train), np.nan_to_num(x_test)
 
 
 headers, data = load_data("databases/nasa_filtered.csv", 104)
-training, testing, validation = train_test_split(headers, data, 0.10, False)
 
+training, testing, = train_test_split(headers, data, 0.05, False)
 
 # randomly remove some data
 def random_remove(df, rate):
@@ -59,24 +61,6 @@ def fill_mean(dataset):
   dataset = np.asarray(dataset).astype('float32')
   return dataset
 
-'''# preprocess of dataset
-y_train = pd.DataFrame(training)
-y_test = pd.DataFrame(testing)
-
-x_train = random_remove(y_train, 0.5)
-x_test = random_remove(y_test, 0.5)
-
-fill_mean(y_train)
-fill_mean(x_train)
-fill_mean(y_test)
-fill_mean(x_test)
-# to test if all values are imputed: print (y_train.isnull().sum().sum())
-
-x_train = np.asarray(x_train).astype('float32')
-y_train = np.asarray(y_train).astype('float32')
-x_test = np.asarray(x_test).astype('float32')
-y_test = np.asarray(y_test).astype('float32')
-'''
 #parameters of model
 nodes = 5
 times = 5
@@ -106,9 +90,9 @@ loss_object = keras.losses.MeanSquaredError()
 optimizer = keras.optimizers.Adam(learning_rate=0.1)
 
 def evaluation(predictions, y):                   # evaluate r2
-    sse = np.sum((y - predictions) ** 2)
-    sst = np.sum((y - np.mean(y)) ** 2)
-    return 1 - sse / sst
+  sse = np.sum((y - predictions) ** 2)
+  sst = np.sum((y - np.mean(y)) ** 2)
+  return 1 - sse / sst
 
 def train(x_train, y_train):               # training step
   with tf.GradientTape() as tape:
@@ -119,31 +103,73 @@ def train(x_train, y_train):               # training step
   r2 = evaluation(predictions, y_train)
   return loss, r2
 
-epochs = 100
-y_train = fill_mean(training)
-for epoch in range(epochs):                # training epochs
-  x_train = random_remove(training, 0.5)
-  fill_mean(x_train)
-  loss, r2 = train(x_train, y_train)
-  if (epoch%100 == 0):
-    template = 'Epoch {}, Loss {}, Evaluation {}'
-    print(template.format(epoch, loss, r2))
+def N_folder_split_data(data, N):
+  data = np.array(data)
+  num = len(data)
+  div = int(np.floor(num / N))
+  res = num % N
+  sep_poi = N - res
+  training = []
+  validation = []
+  for factor in range(1, N + 1):
+    if factor <= sep_poi:
+      i_left = (factor - 1) * div
+      i_right = factor * div
+      data_validate = data[i_left:i_right]
+    elif factor > sep_poi:
+      i_left = sep_poi * div + (factor - sep_poi - 1) * (div + 1)
+      i_right = sep_poi * div + (factor - sep_poi) * (div + 1)
+      data_validate = data[i_left:i_right]
+    data_test_left = data[0:i_left]
+    data_test_right = data[i_right:]
+    data_rest = np.concatenate((data_test_left, data_test_right), axis=0)
+    validation.append(data_validate)
+    training.append(data_rest)
+  return training, validation
 
-def test(x_test, y_test):                      # testing step
-    predictions = model(x_test)
-    loss = loss_object(y_test, predictions)
-    r2 = evaluation(predictions, y_test)
-    template = 'Loss {}, Evaluation {}'
-    print(template.format(loss, r2))
-
+N = 5
+epochs = 15000
+loss_result = 0
+r2_result = 0
 y_test = fill_mean(testing)
 x_test = random_remove(testing, 0.5)
 fill_mean(x_test)
-test(x_test, y_test)          # test
+training_data, validation_data = N_folder_split_data(training, N)
 
-y_validation = fill_mean(validation)
-x_validation = random_remove(validation, 0.5)
-fill_mean(x_validation)
-test(x_validation, y_validation)          # test
+for i in range(N):
+    training = training_data[i]
+    y_train = fill_mean(training)
+    validation = validation_data[i]
+    y_validation = fill_mean(validation)
+    x_validation = random_remove(validation, 0.5)
+    fill_mean(x_validation)
+    for epoch in range(epochs):  # training epochs
+        x_train = random_remove(training, 0.5)
+        fill_mean(x_train)
+        loss, r2 = train(x_train, y_train)
+        if (epoch % 1000 == 0):
+            template = 'Epoch {}, Loss {}, Evaluation {}'
+            print(template.format(epoch, loss, r2))
 
-# predict only: predictons = model(dataset)
+    def test(x_test, y_test):  # testing step
+        predictions = model(x_test)
+        loss = loss_object(y_test, predictions)
+        r2 = evaluation(predictions, y_test)
+        template = 'Loss {}, Evaluation {}'
+        print(template.format(loss, r2))
+
+    def validate(x_validation, y_validation):  # validation step
+        predictions = model(x_validation)
+        loss = loss_object(y_validation, predictions)
+        r2 = evaluation(predictions, y_validation)
+        #template = 'Loss {}, Evaluation {}'
+        #print(template.format(loss, r2))
+        loss = K.eval(loss)
+        return loss, r2
+
+    test(x_test, y_test)  # test
+    loss, r2 = validate(x_validation, y_validation)
+    loss_result = loss+loss_result
+    r2_result = r2+r2_result
+
+print(N, 'fold validation result is:', loss_result/N, r2_result/N)
