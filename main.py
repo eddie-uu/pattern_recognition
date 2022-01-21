@@ -37,7 +37,7 @@ def train_test_split(headers, data, test_size, random):
     return x_train, x_test  # np.nan_to_num(x_train), np.nan_to_num(x_test)
 
 
-headers, data = load_data("databases/nasa_filtered.csv", 104)
+headers, data = load_data("nasa_filtered.csv", 104)
 
 training, testing, = train_test_split(headers, data, 0.05, False)
 
@@ -47,7 +47,7 @@ def random_remove(df, rate):
   rate = rate+df.isnull().sum().sum()/(df.shape[0]*df.shape[1])
   dataset = df.reset_index()
   melt_one = pd.melt(dataset, id_vars = ['index'])
-  sampled = melt_one.sample(frac = rate).reset_index(drop = True)
+  sampled = melt_one.sample(frac = rate, random_state=1).reset_index(drop = True)
   dataset = sampled.pivot(index = 'index', columns = 'variable', values= 'value')
   dataset = np.asarray(dataset).astype('float32')
   return dataset
@@ -60,10 +60,6 @@ def fill_mean(dataset):
     dataset[column].fillna(mean_val, inplace=True)
   dataset = np.asarray(dataset).astype('float32')
   return dataset
-
-#parameters of model
-nodes = 5
-times = 5
 
 # model with expectation-maximization algorithm
 class EMAmodel(Model):
@@ -84,10 +80,6 @@ class EMAmodel(Model):
       output = tf.concat(tmp,1)
       x = (x+output)/2
     return x
-
-model = EMAmodel(training,nodes,times)                     # instantiate model
-loss_object = keras.losses.MeanSquaredError()
-optimizer = keras.optimizers.Adam(learning_rate=0.1)
 
 def evaluation(predictions, y):                   # evaluate r2
   sse = np.sum((y - predictions) ** 2)
@@ -127,14 +119,34 @@ def N_folder_split_data(data, N):
     training.append(data_rest)
   return training, validation
 
+def test(x_test, y_test):  # testing step
+    predictions = model(x_test)
+    loss = loss_object(y_test, predictions)
+    r2 = evaluation(predictions, y_test)
+    template = 'test set: Loss {}, Evaluation {}'
+    print(template.format(loss, r2))
+
+def validate(x_validation, y_validation):  # validation step
+    predictions = model(x_validation)
+    loss = loss_object(y_validation, predictions)
+    r2 = evaluation(predictions, y_validation)
+    template = 'validate set: Loss {}, Evaluation {}'
+    print(template.format(loss, r2))
+    loss = K.eval(loss)
+    return loss, r2
+
 N = 5
-epochs = 15000
-loss_result = 0
-r2_result = 0
+nodes = 5
+times = 5
+epochs = 5
 y_test = fill_mean(testing)
 x_test = random_remove(testing, 0.5)
 fill_mean(x_test)
+loss_object = keras.losses.MeanSquaredError()
+optimizer = keras.optimizers.Adam(learning_rate=0.1)
 training_data, validation_data = N_folder_split_data(training, N)
+loss_result = 0
+r2_result = 0
 
 for i in range(N):
     training = training_data[i]
@@ -143,31 +155,16 @@ for i in range(N):
     y_validation = fill_mean(validation)
     x_validation = random_remove(validation, 0.5)
     fill_mean(x_validation)
-    for epoch in range(epochs):  # training epochs
+    model = EMAmodel(training, nodes, times)           # instantiate model
+    for epoch in range(epochs):                        # training epochs
         x_train = random_remove(training, 0.5)
         fill_mean(x_train)
         loss, r2 = train(x_train, y_train)
-        if (epoch % 1000 == 0):
+        if (epoch % 1 == 0):
             template = 'Epoch {}, Loss {}, Evaluation {}'
             print(template.format(epoch, loss, r2))
+        test(x_test, y_test)  # test
 
-    def test(x_test, y_test):  # testing step
-        predictions = model(x_test)
-        loss = loss_object(y_test, predictions)
-        r2 = evaluation(predictions, y_test)
-        template = 'Loss {}, Evaluation {}'
-        print(template.format(loss, r2))
-
-    def validate(x_validation, y_validation):  # validation step
-        predictions = model(x_validation)
-        loss = loss_object(y_validation, predictions)
-        r2 = evaluation(predictions, y_validation)
-        #template = 'Loss {}, Evaluation {}'
-        #print(template.format(loss, r2))
-        loss = K.eval(loss)
-        return loss, r2
-
-    test(x_test, y_test)  # test
     loss, r2 = validate(x_validation, y_validation)
     loss_result = loss+loss_result
     r2_result = r2+r2_result
