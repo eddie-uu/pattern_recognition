@@ -18,26 +18,19 @@ def load_data(file_name, header_column):
 def train_test_split(headers, data, test_size, random):
     split = int(len(data) * test_size)
 
-    # for checking the model with something more simplistic
-    # orbital_period_days_index = np.where(headers == "Orbital Period Days")[0][0]
-    # mass_index = np.where(headers == "Mass")[0][0]
-
     if random:
         np.random.shuffle(data)
 
-    test_data = data[0: split]
-    training_data = data[split: len(data)]
+    training_data = data[0: split]
+    test_data = data[split: len(data)]
 
-    # x_train = training_data[:, orbital_period_days_index:mass_index + 1]
-    # x_test = test_data[:, orbital_period_days_index:mass_index + 1]
+    x_train = np.asarray(training_data).astype('float32')
+    x_test = np.asarray(test_data).astype('float32')
 
-    x_train = np.asarray(test_data).astype('float32')
-    x_test = np.asarray(training_data).astype('float32')
-
-    return x_train, x_test  # np.nan_to_num(x_train), np.nan_to_num(x_test)
+    return x_train, x_test
 
 
-headers, data = load_data("nasa_filtered.csv", 104)
+headers, data = load_data("nasa_filtered.csv", 1)
 
 training, testing, = train_test_split(headers, data, 0.05, False)
 
