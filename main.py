@@ -21,8 +21,8 @@ def train_test_split(headers, data, test_size, random):
     if random:
         np.random.shuffle(data)
 
-    training_data = data[0: split]
-    test_data = data[split: len(data)]
+    training_data = data[split: len(data)]
+    test_data = data[0: split]
 
     x_train = np.asarray(training_data).astype('float32')
     x_test = np.asarray(test_data).astype('float32')
@@ -30,7 +30,7 @@ def train_test_split(headers, data, test_size, random):
     return x_train, x_test
 
 
-headers, data = load_data("nasa_filtered.csv", 1)
+headers, data = load_data("databases/nasa_filtered.csv", 1)
 
 training, testing, = train_test_split(headers, data, 0.05, False)
 
